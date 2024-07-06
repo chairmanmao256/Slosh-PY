@@ -1,0 +1,7 @@
+N: 10
+M: 5
+nsteps: 200
+nmodes: 3
+SpringModeSpinner: 3
+g: 9.810
+rho: 997.00
