@@ -162,3 +162,76 @@ def phi(n, M, R, Z, Bzeros, L_a):
         return jv(1, Bzeros[n-M-1]*R) * np.exp(Bzeros[n-M-1]*(Z-L_a))
 
 
+def derivedparams(rho,flvol,H,c_k,lambda_k,g,L,a,B,s_n,Ph_a,intb,selm):
+    '''
+    Compute the derived mechanical parameters for the pendulum
+    After running this function, the imaginary part of lambda_k
+    will be discarded
+    '''
+    N = s_n.shape[0]
+    lambda_k = np.real(lambda_k)
+
+    # the mass of the fluid
+    M = flvol*rho
+
+    # gamma that is related to the pendulum
+    gamma_k = np.diag(np.pi*a**3/flvol*(c_k.T@B@c_k))
+
+    # b that is related to the pendulum
+    b_star_k = (np.pi*a**3)/(flvol*gamma_k) * (c_k.T @ B[0, :])
+
+    # mass of all modes
+    M_k = M * lambda_k * gamma_k * (b_star_k**2)
+
+    # the length of the pendulum
+    L_k = a / lambda_k
+
+    # insert the mass of the fluid
+    # sort the M_k * L_k in the descending mannar
+    I = np.flip(np.argsort(M_k * L_k))
+    M_k, L_k = M_k[I], L_k[I]
+
+    # only take the firt selm masses into account
+    Mtot = np.sum(M_k[0:selm])
+    M0 = M - Mtot
+    c_k, lambda_k, b_star_k, Ph_a, gamma_k \
+        = c_k[:, I], lambda_k[I], b_star_k[I], Ph_a[I], gamma_k[I]
+    
+    # h parameter
+    h_k = (2.0*np.pi*a**3)/(flvol*gamma_k*lambda_k) * (c_k.T @ s_n)
+    
+    # height coordinate in the z_CM system
+    H_k = -H + a*(1.0/lambda_k + h_k/b_star_k)
+
+    # slosh amplitude / pendulum amplitude
+    CM_k = Ph_a*b_star_k*lambda_k
+
+    # the height of insert fluid over cg
+    Hcg = abs(intb[2])
+    H_0 = (M*Hcg - (M_k[0:selm]*(H_k[0:selm]-L_k[0:selm])).sum())/M0
+
+    # Non-dimensional frequency
+    K = lambda_k * L/a
+
+    # Natural frequency
+    omega_k = np.sqrt(np.abs(lambda_k)*g/a)
+
+    # Characteristic velocity
+    Vc = omega_k[0]*a
+
+    # add the fixed mass to the list
+    M_k = np.concatenate(([M0], M_k))
+    H_k = np.concatenate(([H_0], H_k))
+    L_k = np.concatenate(([0], L_k))
+    CM_k = np.concatenate(([0], CM_k))
+
+    return K, omega_k, Vc, M_k, L_k, H_k, CM_k, M0, c_k, lambda_k, I
+
+
+def pendulum2spring(M_k, L_k, g, H_k):
+    K_k = M_k*g/L_k
+    H_k_spring = H_k - L_k
+
+    return K_k, H_k_spring
+
+
