@@ -4,6 +4,19 @@ import numpy as np
 from tqdm import tqdm
 from scipy.linalg import eig
 
+def read_dict(fname: str):
+    data_dict = {}
+    with open(fname, "r") as file:
+        for line in file:
+            key, val = line.split(":", 1)
+            key, val = key.strip(), val.strip()
+            if ("." in val) or ("e" in val):
+                data_dict[key] = float(val)
+            else:
+                data_dict[key] = int(val)
+
+    return data_dict
+
 def dBesselj(x, n):
     return (jv(n-1, x) - jv(n+1, x)) / 2.0
 
@@ -229,9 +242,26 @@ def derivedparams(rho,flvol,H,c_k,lambda_k,g,L,a,B,s_n,Ph_a,intb,selm):
 
 
 def pendulum2spring(M_k, L_k, g, H_k):
+    np.seterr(divide='ignore')
     K_k = M_k*g/L_k
     H_k_spring = H_k - L_k
 
     return K_k, H_k_spring
 
+def horizspring(startx, starty, length):
+    xs, ys = [], []
+    xs.append(startx)
+    ys.append(starty)
+
+    for n in range(6):
+        xs.append(startx + length/12.0 + length/6.0 * n)
+        if n % 2 == 0:
+            ys.append(starty - length / 6.0)
+        else:
+            ys.append(starty + length / 6.0)
+
+    xs.append(startx + length)
+    ys.append(starty)
+
+    return np.array(xs), np.array(ys)
 
