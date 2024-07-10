@@ -49,18 +49,17 @@ def dBesselzero(N: int):
 
     return np.sort(Bzeros)
 
-eps = 1e-10
-
 def isinside(r, z, r_ic, r_oc):
     return (r >= r_ic(z)) * (r <= r_oc(z))
 
 
-def Aint(r,z,m,n,M,Bzeros,L,r_ic, r_oc):
+def Aint(r,z,m,n,M,Bzeros,L,r_ic, r_oc, bens):
     '''
     We only get the integrand for a_mn here. 
     '''
-
+    eps = 1e-6
     r = np.clip(r, eps, np.inf)
+    z = np.clip(z, bens[-2]+eps, bens[-1]-eps)
 
     if m > M:
         jm = Bzeros[m-M-1]
@@ -152,9 +151,9 @@ def core(N, M, nsteps, bens, e, L, r_ic, r_oc):
     A = np.zeros((N, N))
     B = np.zeros((N, N))
 
-    for m in tqdm(range(1, N+1)):
+    for m in range(1, N+1):
         for n in range(m, N+1):
-            A[m-1, n-1] = simp2D(lambda r,z: Aint(r,z,m,n,M,Bzeros,L,r_ic,r_oc),
+            A[m-1, n-1] = simp2D(lambda r,z: Aint(r,z,m,n,M,Bzeros,L,r_ic,r_oc, bens),
                                  r_min,r_max,z_min,L,nsteps,nsteps)
             B[m-1, n-1] = Bint(m,n,M,Bzeros,e)
 

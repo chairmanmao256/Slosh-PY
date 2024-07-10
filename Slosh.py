@@ -101,15 +101,19 @@ class Tank:
         self.H_tank = H_tank
         self.H_origin = H_origin
  
-    def calculate(self):
+    def calculate(self, comupute_analogies = True):
         self.A, self.B, self.c_k, self.lambda_k, self.Bzeros = \
                                     sf.core(self.settings["N"], self.settings["M"], 
                                     self.settings["nsteps"], self.intb, self.epsilon,
                                     self.L_a, self.R_ic_CM, self.R_oc_CM)
         
-        self.compute_mechanical_analogies()
+        if comupute_analogies:
+            self.compute_mechanical_analogies()
 
-    def compute_mechanical_analogies(self):
+    def compute_mechanical_analogies(self, g = None):
+        '''
+        The g in the settings can be overided for the flight profile analysis.
+        '''
         epsilon = self.epsilon
         L_a = self.L_a
         a = self.a
@@ -118,7 +122,10 @@ class Tank:
         intb = self.intb * a # convert intb to DIMENSIONAL form
         N = self.settings["N"]
         M = self.settings["M"]
-        g = self.settings["g"]
+        if g == None:
+            g = self.settings["g"]
+        else:
+            pass
         rho = self.settings["rho"]
         flvol = self.fluid_volume
         H = self.H_tank
@@ -283,3 +290,14 @@ class Tank:
                 z_vec = z_vec / np.max(np.abs(z_vec))*L/2
 
             plt.plot(r_vec, z_vec+L, c="r", lw = 1.5)
+
+    def output_analogy_params(self):
+        '''
+        The mechanical analogy's parameters are output here for later integration uses.
+        Here we do not output the K_k, we output L_k instead. This makes all the variables
+        output here non-related to the acceleartion in the axial direction.
+        '''
+        H_k_spring_cm = self.H_k_spring + self.intb[2] * self.a
+
+        return self.M_k, self.L_k, H_k_spring_cm
+
