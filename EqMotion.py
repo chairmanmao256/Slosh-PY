@@ -64,7 +64,7 @@ class Adjoint:
     This is the adjoint solver to determine the K, M, H 
     parametrically by using the adjoint method.
     '''
-    def __init__(self, nmodes, Np, t = None, y0 = None, 
+    def __init__(self, nmodes, Np, weight = None, t = None, y0 = None, 
                  alpha2 = None, alpha3 = None, 
                  theta = None, LFRt = None,
                  q = None, q_func = None):
@@ -81,6 +81,12 @@ class Adjoint:
         self.q_func = q_func
         self.alpha2, self.alpha3, self.theta = alpha2, alpha3, theta
         self.LFRt = LFRt
+
+        if type(weight) != np.ndarray:
+            self.weight = np.ones(self.nmodes)
+        else:
+            assert weight.shape[0] == self.nmodes
+            self.weight = weight
 
     def dYdt_forward(self, y, t, alpha2, alpha3, theta, LFRt):
         '''
@@ -130,7 +136,7 @@ class Adjoint:
         omega = self.omgfunc(LFR)
         q_ = q(t)
         x_ = x(t)
-        dlamdt = -omega*y[self.nmodes:] + 2.0 * (q_[0:self.nmodes] - x_[0:self.nmodes])
+        dlamdt = -omega*y[self.nmodes:] + 2.0 * (q_[0:self.nmodes] - x_[0:self.nmodes]) * self.weight
         # detadt = y[0:self.nmodes] + 2.0 * (q_[self.nmodes:] - x_[self.nmodes:])
         detadt = y[0:self.nmodes] 
 
@@ -187,7 +193,7 @@ class Adjoint:
         Calculate the objective function using simpson's integration;
         `x` and `q` should be arrays here.
         '''
-        integrand = np.sum((x[:, 0:self.nmodes] - q[:, 0:self.nmodes])**2, axis=1)
+        integrand = np.sum(self.weight*(x[:, 0:self.nmodes] - q[:, 0:self.nmodes])**2, axis=1)
         return simpson(y=integrand, x=self.t)
         
     def set_omgfunc(self, p: np.ndarray):
@@ -220,4 +226,14 @@ class Adjoint:
                                                 self.t, self.x_func, self.q_func, self.LFRt)
         
         return self.grad(self.lam, self.x, lfr)
+    
+    def eval_grad_(self, p:np.ndarray):
+        '''
+        Evaluate the gradient at a given point. In this function, we first
+        forward pass the calculation, then we calculate the gradient using
+        the adjoint method.
+        '''
+        objVal = self.eval_obj(p)
+        return self.eval_grad()
+
 
