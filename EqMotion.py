@@ -3,23 +3,6 @@ import os
 from scipy.interpolate import interp1d
 from scipy.integrate import odeint, quad, quad_vec, simpson
 
-def grad_integrand(t, lam_func, x_func, LFR,
-                   nmodes, Np):
-    lfr = LFR(t)
-    lam = lam_func(t)  # (2nmodes,)
-    x = x_func(t)      # (2nmodes,)
-    domgdp = np.array([lfr**k for k in range(Np)]) # shape (Np, )
-    dhdp = x.reshape(-1, 1)[0:nmodes] @ domgdp.reshape(1, -1) # shape (nmodes, Np)
-
-    dhdp_full = np.full((nmodes, nmodes * Np), fill_value=0.0)
-    row_index = np.concatenate([np.ones(Np) * k for k in range(nmodes)])
-    col_index = np.concatenate([np.arange(Np) + k * Np for k in range(nmodes)])
-    dhdp_full[row_index.astype(np.int32), col_index.astype(np.int32)] = dhdp.flatten()
-
-    dFdp_integrand = lam[nmodes:] @ dhdp_full
-
-    return dFdp_integrand # shape (nmodes * Np,)
-
 class Integrator:
     def __init__(self, mechanical_profile_dir = "./Dataset", nmodes=3):
         '''
@@ -81,29 +64,23 @@ class Adjoint:
     This is the adjoint solver to determine the K, M, H 
     parametrically by using the adjoint method.
     '''
-    def __init__(self, p_init: dict, forward_args = None, backward_args=None, t = None, y0 = None, 
+    def __init__(self, nmodes, Np, t = None, y0 = None, 
+                 alpha2 = None, alpha3 = None, 
+                 theta = None, LFRt = None,
                  q = None, q_func = None):
         '''
         The user should input the initial guess of the parameters for K, M, H
         '''
-        self.p_omega = p_init["Omega"] # shape: (nmodes, Np)
-        self.p_H = p_init["H"]         # shape: (nmodes, Np)
-
         # nmodes is num of modes we want to model, Np is the rank of the polynomials
         # we want to use to approximate 
-        self.nmodes, self.Np = self.p_omega.shape
+        self.nmodes, self.Np = nmodes, Np
 
-        # the output of this function has shape: (nmodes, lfr.shape[0])
-        # here we just use the polynomials to approximate the omega(LFR) function
-        self.omgfunc = lambda lfr: self.p_omega @ np.array([lfr**k for k in range(self.Np)])
-        self.domgfunc = lambda lfr: self.p_omega @ np.array([k*lfr**(max(0, k-1)) for k in range(self.Np)])
-
-        self.forward_args = forward_args
-        self.backward_args = backward_args
         self.t = t
         self.y0 = y0
         self.q = q
         self.q_func = q_func
+        self.alpha2, self.alpha3, self.theta = alpha2, alpha3, theta
+        self.LFRt = LFRt
 
     def dYdt_forward(self, y, t, alpha2, alpha3, theta, LFRt):
         '''
@@ -118,7 +95,7 @@ class Adjoint:
 
         return np.concatenate((dxdt, dvdt))
     
-    def forward(self, y0, t, args):
+    def forward(self, y0, t, alpha2, alpha3, theta, LFRt):
         '''
         Calculate the forward problem. An interpolator of the solution 
         is also returned for later adjoint usage.
@@ -129,7 +106,7 @@ class Adjoint:
         self.T = np.max(t)
         self.y0 = y0
 
-        sol = odeint(self.dYdt_forward, y0, t, args=args)
+        sol = odeint(self.dYdt_forward, y0, t, args=(alpha2,alpha3,theta,LFRt))
         sol_func = interp1d(t, sol.T)
 
         return sol, sol_func
@@ -159,27 +136,17 @@ class Adjoint:
 
         return np.concatenate((dlamdt, detadt))
     
-    def backward(self, lam0, tau, args):
+    def backward(self, lam0, tau, x, q, LFRt):
         '''
         After solving the adjoint equation, we flip the lambda
         '''
-        lam = odeint(self.dYdtau_backward, lam0, tau, args=args)
+        lam = odeint(self.dYdtau_backward, lam0, tau, args=(x,q,LFRt))
         lam = np.flip(lam, axis = 0)
         lam_func = interp1d(tau, lam.T)
 
         return lam, lam_func
 
-    def grad(self, lam_func, x_func, LFR, eps = 1e-6, workers=-1):
-        '''
-        `lam`: shape is (npoint, 2*nmodes); it should be 
-        flipped before being parsed to this function
-
-        `x`:   shape is (npoint, 2*nmodes)`
-        '''
-        dFdp = quad_vec(grad_integrand, 0.0+eps, self.T-eps, args=(lam_func,x_func,LFR,self.nmodes,self.Np), workers = workers)
-        return dFdp
-    
-    def grad_simpson(self, lam, x, lfr):
+    def grad(self, lam, x, lfr):
         '''
         Compute the gradient by numerical integration.
         All inputs are arrays.
@@ -215,15 +182,7 @@ class Adjoint:
 
         return dFdp_integrand
         
-    def objFunc(self, x_func, q_func):
-        '''
-        Calculate the integrated MSE of the predicted sloshing signal x and the 
-        measured signal q(ground truth)
-        '''
-        mse = lambda t: ((x_func(t) - q_func(t))[0:self.nmodes]**2).sum()
-        return quad(mse, 0.0, self.T)
-        
-    def objFunc_simpson(self, x, q):
+    def objFunc(self, x, q):
         '''
         Calculate the objective function using simpson's integration;
         `x` and `q` should be arrays here.
@@ -231,23 +190,34 @@ class Adjoint:
         integrand = np.sum((x[:, 0:self.nmodes] - q[:, 0:self.nmodes])**2, axis=1)
         return simpson(y=integrand, x=self.t)
         
+    def set_omgfunc(self, p: np.ndarray):
+        try:
+            self.p_omega = p.reshape(self.nmodes, self.Np)
+        except:
+            raise Exception("The shape of the input p is not consistent with the solver's setting: Np={:d}, nmodes={:d}".format(self.Np, self.nmodes))
+
+        # update the omega functions
+        self.omgfunc = lambda lfr: self.p_omega @ np.array([lfr**k for k in range(self.Np)])
+        self.domgfunc = lambda lfr: self.p_omega @ np.array([k*lfr**(max(0, k-1)) for k in range(self.Np)])
+
     def eval_obj(self, p:np.ndarray):
         '''
         evaluate the objective function given a user specified p.
         The shape of p is (nmodes*Np, )
         '''
-        self.p_omega = p.reshape(self.nmodes, self.Np)
-        self.x, self.x_func = self.forward(self.y0, self.t, args = self.forward_args)
-        return self.objFunc_simpson(self.x, self.q)
+        self.set_omgfunc(p)
+
+        self.x, self.x_func = self.forward(self.y0, self.t, self.alpha2, self.alpha3, self.theta, self.LFRt)
+        return self.objFunc(self.x, self.q)
 
     def eval_grad(self):
         '''
         evaluate the gradient at the current parameters stored
         in the object
         '''
-        lfr = self.backward_args[-1](self.t)
+        lfr = self.LFRt(self.t)
         self.lam, self.lam_func = self.backward(np.zeros(2*self.nmodes), 
-                                                self.t, args = self.backward_args)
+                                                self.t, self.x_func, self.q_func, self.LFRt)
         
-        return self.grad_simpson(self.lam, self.x, lfr)
+        return self.grad(self.lam, self.x, lfr)
 
