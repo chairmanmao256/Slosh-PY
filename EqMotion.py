@@ -1,7 +1,24 @@
 import numpy as np
 import os
 from scipy.interpolate import interp1d
-from scipy.integrate import odeint, quad, quad_vec
+from scipy.integrate import odeint, quad, quad_vec, simpson
+
+def grad_integrand(t, lam_func, x_func, LFR,
+                   nmodes, Np):
+    lfr = LFR(t)
+    lam = lam_func(t)  # (2nmodes,)
+    x = x_func(t)      # (2nmodes,)
+    domgdp = np.array([lfr**k for k in range(Np)]) # shape (Np, )
+    dhdp = x.reshape(-1, 1)[0:nmodes] @ domgdp.reshape(1, -1) # shape (nmodes, Np)
+
+    dhdp_full = np.full((nmodes, nmodes * Np), fill_value=0.0)
+    row_index = np.concatenate([np.ones(Np) * k for k in range(nmodes)])
+    col_index = np.concatenate([np.arange(Np) + k * Np for k in range(nmodes)])
+    dhdp_full[row_index.astype(np.int32), col_index.astype(np.int32)] = dhdp.flatten()
+
+    dFdp_integrand = lam[nmodes:] @ dhdp_full
+
+    return dFdp_integrand # shape (nmodes * Np,)
 
 class Integrator:
     def __init__(self, mechanical_profile_dir = "./Dataset", nmodes=3):
@@ -64,7 +81,8 @@ class Adjoint:
     This is the adjoint solver to determine the K, M, H 
     parametrically by using the adjoint method.
     '''
-    def __init__(self, p_init: dict):
+    def __init__(self, p_init: dict, forward_args = None, backward_args=None, t = None, y0 = None, 
+                 q = None, q_func = None):
         '''
         The user should input the initial guess of the parameters for K, M, H
         '''
@@ -80,6 +98,12 @@ class Adjoint:
         self.omgfunc = lambda lfr: self.p_omega @ np.array([lfr**k for k in range(self.Np)])
         self.domgfunc = lambda lfr: self.p_omega @ np.array([k*lfr**(max(0, k-1)) for k in range(self.Np)])
 
+        self.forward_args = forward_args
+        self.backward_args = backward_args
+        self.t = t
+        self.y0 = y0
+        self.q = q
+        self.q_func = q_func
 
     def dYdt_forward(self, y, t, alpha2, alpha3, theta, LFRt):
         '''
@@ -140,34 +164,90 @@ class Adjoint:
         After solving the adjoint equation, we flip the lambda
         '''
         lam = odeint(self.dYdtau_backward, lam0, tau, args=args)
-        lam = np.flip(lam)
+        lam = np.flip(lam, axis = 0)
         lam_func = interp1d(tau, lam.T)
 
         return lam, lam_func
 
-    def grad(self, lam_func, x_func, LFR, eps = 1e-6):
+    def grad(self, lam_func, x_func, LFR, eps = 1e-6, workers=-1):
         '''
         `lam`: shape is (npoint, 2*nmodes); it should be 
         flipped before being parsed to this function
 
         `x`:   shape is (npoint, 2*nmodes)`
         '''
-        dFdp = quad_vec(self.grad_integrand, 0.0+eps, self.T-eps, args=(lam_func,x_func,LFR))
+        dFdp = quad_vec(grad_integrand, 0.0+eps, self.T-eps, args=(lam_func,x_func,LFR,self.nmodes,self.Np), workers = workers)
+        return dFdp
+    
+    def grad_simpson(self, lam, x, lfr):
+        '''
+        Compute the gradient by numerical integration.
+        All inputs are arrays.
+
+        lam: (nt, 2*nmodes)
+        x:   (nt, 2*nmodes)
+        lfr: (nt,)
+        '''
+        dFdp = simpson(y=self.grad_integrand(lam,x,lfr),x=self.t)
         return dFdp
 
+    def grad_integrand(self, lam, x, lfr):
+        '''
+        Compute the integrand (discretized version) for numerical integration.
+        All inputs are arrays.
 
-    def grad_integrand(self, t, lam_func, x_func, LFR):
-        lfr = LFR(t)
-        lam = lam_func(t)  # (2nmodes,)
-        x = x_func(t)      # (2nmodes,)
-        domgdp = np.array([lfr**k for k in range(self.Np)]) # shape (Np, )
-        dhdp = x.reshape(-1, 1)[0:self.nmodes] @ domgdp.reshape(1, -1) # shape (nmodes, Np)
+        lam: (nt, 2*nmodes)
+        x:   (nt, 2*nmodes)
+        lfr: (nt,)
+        '''
+        x = x.T
+        lam = lam.T
 
-        dhdp_full = np.full((self.nmodes, self.nmodes * self.Np), fill_value=0.0)
-        row_index = np.concatenate([np.ones(self.Np) * k for k in range(self.nmodes)])
-        col_index = np.concatenate([np.arange(self.Np) + k * self.Np for k in range(self.nmodes)])
-        dhdp_full[row_index.astype(np.int32), col_index.astype(np.int32)] = dhdp.flatten()
+        nt = lfr.shape[0]
+        domgdp = np.array([lfr**k for k in range(self.Np)]) # Shape: (Np, nt)
+        dhdp = np.zeros((self.nmodes, self.nmodes*self.Np, nt))
+        dhdp[np.arange(self.nmodes)[:, None], 
+             np.arange(self.nmodes*self.Np).reshape(self.nmodes, self.Np), :]\
+            = x[0:self.nmodes,np.newaxis,:] * domgdp[np.newaxis,:,:]
+        
+        dFdp_integrand = np.zeros((self.nmodes*self.Np, nt))
+        dFdp_integrand = np.einsum('it,ijt->jt',lam[self.nmodes:,:],dhdp)
 
-        dFdp_integrand = lam[self.nmodes:] @ dhdp_full
+        return dFdp_integrand
+        
+    def objFunc(self, x_func, q_func):
+        '''
+        Calculate the integrated MSE of the predicted sloshing signal x and the 
+        measured signal q(ground truth)
+        '''
+        mse = lambda t: ((x_func(t) - q_func(t))[0:self.nmodes]**2).sum()
+        return quad(mse, 0.0, self.T)
+        
+    def objFunc_simpson(self, x, q):
+        '''
+        Calculate the objective function using simpson's integration;
+        `x` and `q` should be arrays here.
+        '''
+        integrand = np.sum((x[:, 0:self.nmodes] - q[:, 0:self.nmodes])**2, axis=1)
+        return simpson(y=integrand, x=self.t)
+        
+    def eval_obj(self, p:np.ndarray):
+        '''
+        evaluate the objective function given a user specified p.
+        The shape of p is (nmodes*Np, )
+        '''
+        self.p_omega = p.reshape(self.nmodes, self.Np)
+        self.x, self.x_func = self.forward(self.y0, self.t, args = self.forward_args)
+        return self.objFunc_simpson(self.x, self.q)
 
-        return dFdp_integrand # shape (nmodes * Np,)
+    def eval_grad(self):
+        '''
+        evaluate the gradient at the current parameters stored
+        in the object
+        '''
+        lfr = self.backward_args[-1](self.t)
+        self.lam, self.lam_func = self.backward(np.zeros(2*self.nmodes), 
+                                                self.t, args = self.backward_args)
+        
+        return self.grad_simpson(self.lam, self.x, lfr)
+
