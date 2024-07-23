@@ -64,7 +64,8 @@ class Adjoint:
     This is the adjoint solver to determine the K, M, H 
     parametrically by using the adjoint method.
     '''
-    def __init__(self, nmodes, Np, weight = None, t = None, y0 = None, 
+    def __init__(self, nmodes, Np, weight = None, corrweight=None,
+                 t = None, y0 = None, 
                  alpha2 = None, alpha3 = None, 
                  theta = None, LFRt = None,
                  q = None, q_func = None):
@@ -87,6 +88,12 @@ class Adjoint:
         else:
             assert weight.shape[0] == self.nmodes
             self.weight = weight
+
+        if type(corrweight) != np.ndarray:
+            self.corrweight = np.zeros(self.nmodes)
+        else:
+            assert corrweight.shape[0] == self.nmodes
+            self.corrweight = corrweight
 
     def dYdt_forward(self, y, t, alpha2, alpha3, theta, LFRt):
         '''
@@ -136,7 +143,7 @@ class Adjoint:
         omega = self.omgfunc(LFR)
         q_ = q(t)
         x_ = x(t)
-        dlamdt = -omega*y[self.nmodes:] + 2.0 * (q_[0:self.nmodes] - x_[0:self.nmodes]) * self.weight
+        dlamdt = -omega*y[self.nmodes:] + 2.0 * (q_[0:self.nmodes] - x_[0:self.nmodes]) * self.weight + q_[0:self.nmodes] * self.corrweight
         # detadt = y[0:self.nmodes] + 2.0 * (q_[self.nmodes:] - x_[self.nmodes:])
         detadt = y[0:self.nmodes] 
 
@@ -193,7 +200,9 @@ class Adjoint:
         Calculate the objective function using simpson's integration;
         `x` and `q` should be arrays here.
         '''
-        integrand = np.sum(self.weight*(x[:, 0:self.nmodes] - q[:, 0:self.nmodes])**2, axis=1)
+        integrand = np.sum(self.weight*(x[:, 0:self.nmodes] - q[:, 0:self.nmodes])**2
+                           - self.corrweight*x[:, 0:self.nmodes]*q[:, 0:self.nmodes],
+                           axis=1)
         return simpson(y=integrand, x=self.t)
         
     def set_omgfunc(self, p: np.ndarray):
