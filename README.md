@@ -102,6 +102,40 @@ The optimization problem is then solved by `scipy.optimize.minimize` function.
 
 ### **2.1 Infer constant natural frequency**
 
-We try to recover the constant natural fequency from the solution of a 2-nd vibration ODE ($\omega_k^2=p_{k0}$). 
+We try to recover the constant natural fequency from the solution of a 2-nd vibration ODE ($\omega_k^2=p_{k0}$). The dataset we are using is:
+$$
+\frac{d}{dt} \begin{pmatrix}
+q_k\\ \dot{q}_k
+\end{pmatrix}=\begin{pmatrix}
+\dot{q}_k\\
+-\alpha_2-\omega_k^2q_k
+\end{pmatrix},k=1,2,3
+$$
 
+$$
+(\omega_1^2,\omega_2^2, \omega_3^2)=(6.0, 20.0, 40.0);q_k(0),\dot{q_k}(0)=0
+$$
 
+$$
+\alpha_2(t)=\exp(-t^2/4)\\
+\alpha_3(t)=g+5gt/150\\
+LFR(t)=0.95 - (0.95-0.15)t/80
+$$
+
+$q_k(t)$ is the observed signal. We solve the ODE to $T=40$ to get the data. Now we try to use gradient optimization algorithm to recover the exact value of $\omega_k^2$ (that is, $p_{k0}$) from data. The gradient is computed by the continuous adjoint method. 
+
+We check the accuracy of the gradient given by the continuous adjoint by comparing it with the result given by finite difference (FD). The adjoint (AD) sensitivity and the FD sensitivity are compared in the bar-plot below. The AD and the FD sensitivity agree well for large FD step. However, when the FD step gets smaller, the numrical error becomes more and more dominant, causing significant error in the sensitivity. Consequently, the AD is more reliable. On the other hand, the AD allows us to use the amount of time nearly identical to the amount of time spent on evaluating the objective to get the full gradient, while FD requires at least $N$ times of objective function evaluation, where $N$ is the number of parameters to be optimized. 
+
+![grad_const](./Figures/gradient_const_freq.png "Gradient of the constant freq case")
+
+Solving the optimization problem using the `scipy.optimize.minimize` function, we get the following result shown in the figure. The signal produced by the optimized parameters overlaps with the groud truth signal (the $q_k$), demonstrating a great improvement compared with the initial guess. In fact, the exact natural frequency is fully recovered by the algorithm, as shown in the table.
+
+![recover_const](./Figures/recover_const_freq.png "Recover constant frequency")
+
+| **$\omega_k^2$** | 6.0 | 20.0 | 40.0 |
+|------------------|-----|------|------|
+| **$p_{k0}$**     | 6.0 | 20.0 | 40.0 |
+
+It should be noted that for the high frequency signal, like the signal of mode 2 and mode 3, the optimized parameter $p_{k0}$ is highly dependent on the initial guess. The variation of the objective with respective to the parameter $p_{30}$ is shown in the figure below. 2 local minimas can be found in the interval $(20,40)$. If the initial guess is around these 2 local minimas, the exact frequency will not be recovered by the gradient optimization algorithm. Consequently, in the future, I plan to use evolutionery algorithms to find a good-enough guess for the parameters first, and then switch to the gradient descent method to fully optimize the parameters.
+
+![local_minma](./Figures/local_minima.png "Local minma")
