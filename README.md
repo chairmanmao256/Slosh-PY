@@ -155,7 +155,7 @@ $$
 According to the literature, only the first mode has a significant impact on the forces and torques produced by the liquid. Consequently, we set the weights in the objective function to:
 
 $$
-(w_1,w_2,w_3)=(1.0,0.0,0.0)
+(w_1,w_2,w_3)=(10.0,0.0,0.0)
 $$
 
 We first try linear model to approximate the natural frequency $\omega_1^2$:
@@ -171,3 +171,18 @@ The gradient of the objective function $F$ with respect to $p_{10}$ and $p_{11}$
 The reconstructed signal and the inferred mechanical parameters are shown in the figure below. The linear model can approximate the $\omega_1^2-LFR$ relation when $LFR$ is low (when $t$ is large), thus producing a good agreement in the sloshing signal when $t$ is large. However, the $\omega_1^2-LFR$ relation deviates from the ground truth a lot when $LFR$ is large, giving a slightly larger error when $t$ is small.
 
 ![Saturn-V_linear](./Figures/recover_linear_SaturnV.png "Saturn-V linear")
+
+We now further improve the estimation of the mechanical parameters by expanding the polynomial to second-order term:
+
+$$
+\omega_1^2(LFR)=p_{10}+p_{11}LFR+p_{12}LFR^2
+$$
+
+The initial guess is taken to be the result of the linear approximation with $p_{12}=0.0$. After optimization, the recovered signal and the inferred mechanical parameters are shown in the figure below. The accuracy at high $LFR$ is greatly improved by incorporating the 2nd-order term. On the other hand, the estimation of maximum sloshing maginitude also gets more accurate.
+
+![Saturn-V_2nd](./Figures/recover_2ndOrder_SaturnV.png "Saturn-V 2nd-order")
+
+Now we compare the accuracy of the initial guess, the linear approximation, and the second-order approximation. As we increase the complexity of the model further, the error of the recovered signal drops progressively.
+
+![progressive-err](./Figures/progressive-error.png "progressive error")
+
