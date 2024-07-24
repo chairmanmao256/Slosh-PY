@@ -91,10 +91,10 @@ x_{k}(t)\frac{\partial\omega^2_{k}}{\partial p_{k0}} & \cdots & x_{k}(t)\frac{\p
 $$
 $$
 \nabla_p F=\int_0^T(\lambda_1(t),\cdots,\lambda_{N_{mode}}(t))\begin{pmatrix}
-h_1(t) & 0 &\cdots & 0\\
-0 & h_2(t) &\cdots & 0\\
+h_1(t) & O &\cdots & O\\
+O & h_2(t) &\cdots & O\\
 \cdots & \cdots &\cdots &\cdots\\
-0 & 0 &\cdots & h_{N_{mode}}(t)\\
+O & O &\cdots & h_{N_{mode}}(t)\\
 \end{pmatrix}dt
 $$
 
@@ -139,3 +139,35 @@ Solving the optimization problem using the `scipy.optimize.minimize` function, w
 It should be noted that for the high frequency signal, like the signal of mode 2 and mode 3, the optimized parameter $p_{k0}$ is highly dependent on the initial guess. The variation of the objective with respective to the parameter $p_{30}$ is shown in the figure below. 2 local minimas can be found in the interval $(20,40)$. If the initial guess is around these 2 local minimas, the exact frequency will not be recovered by the gradient optimization algorithm. Consequently, in the future, I plan to use evolutionery algorithms to find a good-enough guess for the parameters first, and then switch to the gradient descent method to fully optimize the parameters.
 
 ![local_minma](./Figures/local_minima.png "Local minma")
+
+### **2.2 Infer the natural frequency of the Saturn-V's tank**
+
+In this section, we use Slosh-PY to get the true natural frequency-LFR relation of the Saturn-V's tank. After setting $\alpha_2(t),\alpha_3(t)$, and $LFR(t)$, we run a simulation to get the 'high-fidelity' sloshing data $q_k(t)$. Then the inverse problem is solved by performing gradient-based optimization. The $\alpha_2(t), \alpha_3(t)$, and the $LFR(t)$ are defined as:
+
+$$
+\begin{aligned}
+\alpha_2(t)&=\sin(\frac{2\pi}{3}t)\tanh(\frac{t}{150})\\
+\alpha_3(t)&=g+5gt/150\\
+ LFR(t)    &=0.95 - (0.95-0.15)t/80
+\end{aligned}
+$$
+
+According to the literature, only the first mode has a significant impact on the forces and torques produced by the liquid. Consequently, we set the weights in the objective function to:
+
+$$
+(w_1,w_2,w_3)=(1.0,0.0,0.0)
+$$
+
+We first try linear model to approximate the natural frequency $\omega_1^2$:
+
+$$
+\omega_1^2=p_{10}+p_{11}LFR
+$$
+
+The gradient of the objective function $F$ with respect to $p_{10}$ and $p_{11}$ is shwon in the figrue below. In this case, the numerical error in the FD result is more dominant, the error increases faster than the constant frequency case as the step becomes smaller and smaller, even for the $p_{10}$. This again emphasizes the importance of using adjoint method to compute the gradient.
+
+![Saturn-V_grad](./Figures/gradient_Saturn_linear.png "Saturn-V gradient")
+
+The reconstructed signal and the inferred mechanical parameters are shown in the figure below. The linear model can approximate the $\omega_1^2-LFR$ relation when $LFR$ is low (when $t$ is large), thus producing a good agreement in the sloshing signal when $t$ is large. However, the $\omega_1^2-LFR$ relation deviates from the ground truth a lot when $LFR$ is large, giving a slightly larger error when $t$ is small.
+
+![Saturn-V_linear](./Figures/recover_linear_SaturnV.png "Saturn-V linear")
