@@ -117,9 +117,11 @@ $$
 $$
 
 $$
-\alpha_2(t)=\exp(-t^2/4)\\
-\alpha_3(t)=g+5gt/150\\
-LFR(t)=0.95 - (0.95-0.15)t/80
+\begin{aligned}
+\alpha_2(t)&=\exp(-t^2/4)\\
+\alpha_3(t)&=g+5gt/150\\
+LFR(t)&=0.95 - (0.95-0.15)t/80
+\end{aligned}
 $$
 
 $q_k(t)$ is the observed signal. We solve the ODE to $T=40$ to get the data. Now we try to use gradient optimization algorithm to recover the exact value of $\omega_k^2$ (that is, $p_{k0}$) from data. The gradient is computed by the continuous adjoint method. 
